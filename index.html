@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Solei 3D · Castellbell i el Vilar</title>
+<meta name="theme-color" content="#1d2421">
+<style>
+  :root { --bg: rgba(24,30,27,.86); --fg: #eef1ec; --mut: #a9b3ab; --acc: #7fd1a8; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb6c9; font: 14px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); touch-action: none; }
+  canvas { display: block; }
+  #bar { position: fixed; top: env(safe-area-inset-top, 0); left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; pointer-events: none; }
+  .grp { display: flex; background: var(--bg); border-radius: 10px; overflow: hidden; pointer-events: auto; backdrop-filter: blur(6px); }
+  .grp button { appearance: none; border: 0; background: transparent; color: var(--fg); padding: 9px 11px; font: inherit; font-weight: 600; min-height: 38px; cursor: pointer; }
+  .grp button.on { background: var(--acc); color: #10261b; }
+  #panel { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0)); max-width: 460px; background: var(--bg); border-radius: 12px; padding: 10px 12px; backdrop-filter: blur(6px); display: none; }
+  #panel.show { display: block; }
+  #panel h3 { margin: 0 0 4px; font-size: 15px; }
+  #panel .row { display: flex; justify-content: space-between; gap: 10px; color: var(--mut); }
+  #panel .row b { color: var(--fg); font-weight: 600; }
+  #panel .acts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  #panel .acts button { flex: 1; border: 0; border-radius: 8px; padding: 9px; font: inherit; font-weight: 600; background: #34403a; color: var(--fg); }
+  #panel .x { position: absolute; right: 8px; top: 6px; background: none; border: 0; color: var(--mut); font-size: 20px; }
+  #legend { position: fixed; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0)); background: var(--bg); border-radius: 10px; padding: 8px 10px; font-size: 12px; display: none; }
+  #legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  #legend input { width: 130px; }
+  #status { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); background: var(--bg); padding: 12px 16px; border-radius: 10px; }
+  #walkhint { position: fixed; left: 0; right: 0; bottom: 30%; text-align: center; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none; display: none; font-weight: 600; }
+  #stick { position: fixed; width: 110px; height: 110px; border-radius: 50%; border: 2px solid rgba(255,255,255,.6); background: rgba(0,0,0,.15); display: none; pointer-events: none; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px; border-radius: 50%; background: rgba(255,255,255,.7); }
+  #credit { position: fixed; left: 8px; bottom: 2px; font-size: 10px; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #compass { position: fixed; right: 10px; top: calc(58px + env(safe-area-inset-top, 0)); width: 40px; height: 40px; border-radius: 50%; background: var(--bg); display: flex; align-items: center; justify-content: center; font-weight: 700; pointer-events: auto; cursor: pointer; }
+  #compass span { display: block; transform-origin: 50% 50%; }
+  @media (max-width: 520px) { .grp button { padding: 8px 9px; font-size: 13px; } #legend { bottom: auto; top: calc(104px + env(safe-area-inset-top, 0)); } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./lib/three.module.js",
+               "three/addons/": "./lib/" } }
+</script>
+</head>
+<body>
+<div id="bar">
+  <div class="grp" id="g-base"><button data-v="photo" class="on">Photo</button><button data-v="map">Map</button><button data-v="relief">Relief</button></div>
+  <div class="grp" id="g-model"><button data-v="dtm" class="on">Ground</button><button data-v="dsm">Trees</button></div>
+  <div class="grp" id="g-ovl"><button data-v="drain">Water</button><button data-v="slope">Slope</button></div>
+  <div class="grp" id="g-mode"><button data-v="orbit" class="on">Fly</button><button data-v="walk">Walk</button></div>
+  <div class="grp" id="g-exag"><button id="exag">1×</button></div>
+</div>
+<div id="compass" title="Face north"><span>N</span></div>
+<div id="legend"></div>
+<div id="panel"><button class="x" id="pclose">×</button><div id="pbody"></div></div>
+<div id="status">Loading terrain…</div>
+<div id="walkhint">Left side: move · Right side: look</div>
+<div id="stick"><i></i></div>
+<div id="credit">LiDAR, orthophoto & map: ICGC (CC BY 4.0)</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
