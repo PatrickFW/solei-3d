@@ -1,4 +1,4 @@
-<!-- Generated: 2026-10-31 19:25 CET · Updated: 2026-10-31 19:40 CET -->
+<!-- Generated: 2026-10-31 19:25 CET · Updated: 2026-10-31 20:15 CET -->
 # Solei 3D: Castellbell i el Vilar terrain model
 
 A 3D model of the area covered by ICGC 1:5,000 sheet (Solell de la Barraca, Torrent del Tortuguer, Solell dels Abadals), built from ICGC airborne LiDAR. It opens in a phone or desktop browser.
@@ -6,7 +6,8 @@ A 3D model of the area covered by ICGC 1:5,000 sheet (Solell de la Barraca, Torr
 ## What it covers
 - Block: UTM 31N (ETRS89) E 402,000 to 405,000, N 4,608,000 to 4,610,000 (3 x 2 km). This includes the whole map sheet plus a margin to the east (C-55, Llobregat side).
 - Terrain detail: 0.5 m grid near the camera, coarser further away.
-- Ground model: LiDAR ground points (class 2), averaged per 0.5 m cell. Gaps under dense pines are filled by interpolation.
+- Ground model: LiDAR points in ICGC classes 2, 8 and 75, averaged per 0.5 m cell. All three classes lie on the ground surface; classes 8 and 75 carry most of the terrace walls and steep faces. Remaining gaps, mostly under dense pines, are filled by interpolation with no extra smoothing, so wall steps stay sharp.
+- Full 0.5 m detail is shown within about 190 m of the camera. Measure, tap readings and walking use the 0.5 m ground where it is loaded.
 - Trees model: highest LiDAR return per 0.5 m cell (trees, buildings, walls).
 
 ## Controls

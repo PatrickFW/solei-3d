@@ -203,7 +203,7 @@ function wantedLevel(c, camPos) {
   const gy = (groundAt(px, pz) - YOFF) * state.exag;
   const d = Math.hypot(camPos.x - px, (camPos.y - gy) * 0.8, camPos.z - pz);
   const k = state.mode === 'walk' ? 0.8 : 1;
-  return d < 110 * k ? 4 : d < 280 * k ? 3 : d < 650 ? 2 : d < 1400 ? 1 : 0;
+  return d < 190 * k ? 4 : d < 420 * k ? 3 : d < 800 ? 2 : d < 1500 ? 1 : 0;
 }
 let inflight = 0; const MAXF = 6;
 function updateChunks() {
@@ -236,7 +236,20 @@ function bilinear(g, fx, fy) {
   const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, w = g.w;
   return (g.z[j * w + i] * (1 - u) + g.z[j * w + i + 1] * u) * (1 - v) + (g.z[(j + 1) * w + i] * (1 - u) + g.z[(j + 1) * w + i + 1] * u) * v;
 }
-const groundAt = (x, z) => bilinear(ground2, x / 2, z / 2);
+const ground2At = (x, z) => bilinear(ground2, x / 2, z / 2);
+const fineKey = (cx, cy) => `data/h/dtm/4/${cx}_${cy}.png`;
+// ground level: 0.5 m bare-ground detail where it is loaded (keeps terrace walls as steps), else the 2 m grid
+function groundAt(x, z) {
+  const cx = Math.min(NCX - 1, Math.max(0, Math.floor(x / CH))), cy = Math.min(NCY - 1, Math.max(0, Math.floor(z / CH)));
+  const g = hcache.get(fineKey(cx, cy));
+  if (!g) return ground2At(x, z);
+  return bilinear(g, (x - cx * CH) / LEVELS[4], (z - cy * CH) / LEVELS[4]);
+}
+async function loadFineAlong(pts) {
+  const need = new Set();
+  for (const p of pts) need.add(fineKey(Math.min(NCX - 1, Math.max(0, Math.floor(p.x / CH))), Math.min(NCY - 1, Math.max(0, Math.floor(p.z / CH)))));
+  await Promise.all([...need].map((k) => getHeights(k)));
+}
 const surfaceAt = (x, z) => (overview.dsm ? bilinear(overview.dsm, x / 8, z / 8) : groundAt(x, z));
 
 // ---------- controls ----------
@@ -320,7 +333,7 @@ el.addEventListener('pointerup', (e) => {
     const o = ray.ray.origin.clone(), d = ray.ray.direction.clone();
     for (let t = 0; t < 8000; t += 2) { const p = o.clone().addScaledVector(d, t); if (p.x < 0 || p.z < 0 || p.x > W || p.z > H) continue; if (p.y <= (surfaceAt(p.x, p.z) - YOFF) * state.exag) { hit = p; break; } }
   }
-  if (hit) { if (state.measure) addMeasurePoint(hit.x, hit.z); else showInfo(hit.x, hit.z); }
+  if (hit) { if (state.measure) addMeasurePoint(hit.x, hit.z); else loadFineAlong([hit]).then(() => showInfo(hit.x, hit.z)); }
 });
 const fmt = (n, d = 0) => n.toLocaleString('en-GB', { maximumFractionDigits: d, minimumFractionDigits: d });
 function areaStr(m2) { return m2 >= 10000 ? `${fmt(m2 / 10000, m2 >= 100000 ? 0 : 1)} ha` : `${fmt(m2)} m²`; }
@@ -387,7 +400,7 @@ function pinSprite(label, color) {
   sp.scale.set(0.055, 0.055, 1); sp.renderOrder = 10; return sp;
 }
 function profile(a, b) {
-  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(2, Math.ceil(d / 1)); // 1 m steps
+  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(2, Math.ceil(d / (d < 600 ? 0.25 : 0.5))); // fine steps catch terrace walls
   const pts = []; let along = 0, climb = 0, drop = 0, prev = null;
   for (let i = 0; i <= n; i++) {
     const t = i / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t, h = groundAt(x, z);
@@ -408,9 +421,16 @@ function drawMeasure() {
   const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe14d, depthTest: false })); line.renderOrder = 9; mGroup.add(line);
   return pr;
 }
-function addMeasurePoint(x, z) {
+async function addMeasurePoint(x, z) {
   if (mPts.length >= 2) mPts.length = 0;
-  mPts.push({ x, z }); const pr = drawMeasure();
+  mPts.push({ x, z });
+  if (mPts.length === 2) {
+    const a = mPts[0], n = Math.ceil(Math.hypot(x - a.x, z - a.z) / 20) + 1, along = [];
+    for (let i = 0; i <= n; i++) along.push({ x: a.x + (x - a.x) * i / n, z: a.z + (z - a.z) * i / n });
+    $('#pbody').innerHTML = '<h3>Measure</h3><div class="row">Loading 0.5 m ground detail along the line…</div>';
+    await loadFineAlong(along);
+  } else await loadFineAlong([{ x, z }]);
+  const pr = drawMeasure();
   if (mPts.length === 1) {
     $('#pbody').innerHTML = `<h3>Measure</h3><div class="row">A: ground level <b>${fmt(groundAt(x, z), 1)} m</b></div><div class="row">Now tap point B.</div>`;
     $('#panel').classList.add('show'); return;
@@ -446,7 +466,7 @@ function addMeasurePoint(x, z) {
     <div class="acts"><button id="m-swap">Swap A and B</button><button id="m-clear">Clear</button></div>`;
   $('#panel').classList.add('show');
   $('#m-clear').onclick = () => { mPts.length = 0; drawMeasure(); $('#panel').classList.remove('show'); };
-  $('#m-swap').onclick = () => { const [p, q] = mPts; mPts.length = 0; addMeasurePoint(q.x, q.z); addMeasurePoint(p.x, p.z); };
+  $('#m-swap').onclick = async () => { const [p, q] = mPts; mPts.length = 0; await addMeasurePoint(q.x, q.z); await addMeasurePoint(p.x, p.z); };
 }
 
 // ---------- UI ----------

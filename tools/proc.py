@@ -12,7 +12,7 @@ with laspy.open(f) as fh:
         i = ((x - e0) / R).astype(np.int64); j = ((n0 + 1000 - y) / R).astype(np.int64)
         ok = (i >= 0) & (i < W) & (j >= 0) & (j < W) & ~wh & (c != 7) & (c != 18)
         idx = j[ok] * W + i[ok]; zz = z[ok]; cc = c[ok]
-        g = cc == 2
+        g = (cc == 2) | (cc == 8) | (cc == 75)  # ICGC: 8 and 75 also lie on the ground (terrace walls, steep faces)
         gsum += np.bincount(idx[g], weights=zz[g], minlength=W*W)
         gcnt += np.bincount(idx[g], minlength=W*W).astype(np.uint32)
         o = np.argsort(idx, kind='stable'); si = idx[o]; sz = zz[o]

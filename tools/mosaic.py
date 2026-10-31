@@ -4,10 +4,10 @@ from scipy import ndimage as nd
 E0, N1, R = 402000, 4610000, 0.5
 W, H = 6000, 4000
 G = np.full((H, W), np.nan, np.float32); S = np.full((H, W), np.nan, np.float32); C = np.zeros((H, W), np.uint16)
-for f in sorted(glob.glob('/mnt/user-data/uploads/solei-3d/grids/g*.npz')):
+for f in sorted(glob.glob('/mnt/user-data/uploads/solei-3d/grids/g4*.npz')):
     t = os.path.basename(f)[1:7]; e = int(t[:3]) * 1000; n = 4000000 + int(t[3:]) * 1000
     c0 = int((e - E0) / R); r0 = int((N1 - (n + 1000)) / R)
-    d = np.load(f); G[r0:r0+2000, c0:c0+2000] = d['ground']; S[r0:r0+2000, c0:c0+2000] = d['surface']; C[r0:r0+2000, c0:c0+2000] = d['gcount']
+    d = np.load(f); v = np.load(f'/home/claude/work/g2/ground_{t}.npz')['v']; G[r0:r0+2000, c0:c0+2000] = np.where(v == 65535, np.nan, v / 100.0 + 100).astype(np.float32); S[r0:r0+2000, c0:c0+2000] = d['surface']; C[r0:r0+2000, c0:c0+2000] = d['gcount']
     print('tile', t, r0, c0)
 have = np.isfinite(S)
 def nanfill(a):
@@ -29,12 +29,12 @@ def nanfill(a):
 med = nd.generic_filter(np.nan_to_num(G, nan=-9999), lambda v: np.median(v[v > -9000]) if (v > -9000).sum() > 4 else -9999, size=5) if False else None
 Gf = nanfill(G)
 loc = nd.median_filter(Gf, size=7)
-spike = np.isfinite(G) & (G - loc > 4)
+spike = np.isfinite(G) & (G - loc > 8)
 print('ground spikes', spike.sum())
 G2 = G.copy(); G2[spike] = np.nan
 Gf = nanfill(G2)
 # smooth only interpolated cells a little
-sm = nd.gaussian_filter(Gf, 1.0)
+sm = Gf  # no extra smoothing: keeps terrace wall steps sharp
 Gf = np.where(np.isfinite(G2), Gf, sm).astype(np.float32)
 Sf = nanfill(S)
 locS = nd.median_filter(Sf, size=3)
