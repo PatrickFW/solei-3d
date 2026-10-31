@@ -1,4 +1,4 @@
-<!-- Generated: 2026-10-31 19:25 CET -->
+<!-- Generated: 2026-10-31 19:25 CET · Updated: 2026-10-31 19:40 CET -->
 # Solei 3D: Castellbell i el Vilar terrain model
 
 A 3D model of the area covered by ICGC 1:5,000 sheet (Solell de la Barraca, Torrent del Tortuguer, Solell dels Abadals), built from ICGC airborne LiDAR. It opens in a phone or desktop browser.
@@ -17,6 +17,13 @@ A 3D model of the area covered by ICGC 1:5,000 sheet (Solell de la Barraca, Torr
 - **Fly**: one finger pans, two fingers rotate, tilt and zoom.
 - **Walk**: left half of the screen moves, right half looks. Walking always uses the bare-ground model. On desktop use WASD or the arrow keys plus mouse drag; hold Shift to go faster.
 - **Tap a point**: ground level, slope, area draining to it, UTM coordinates. From there you can show its upstream catchment or start walking.
+- **Measure**: tap point A, then point B. The panel shows:
+  - the height difference and the map (horizontal) distance;
+  - the straight 3D distance and the average gradient;
+  - the distance over the ground along the line, the total climb and drop along it, and its highest and lowest points;
+  - a ground profile.
+
+  Heights are bare-ground levels from the LiDAR model, accurate to about ±0.15 m on open ground and less certain under dense pines. A third tap starts a new measurement.
 - **1x / 1.5x / 2x**: vertical exaggeration.
 
 ## Drainage method and limits

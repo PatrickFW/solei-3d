@@ -155,7 +155,7 @@ function buildGeometry(hgt, x0, z0, res, sub) {
 }
 
 // ---------- chunks ----------
-const state = { base: 'photo', model: 'dtm', mode: 'orbit', exag: 1 };
+const state = { base: 'photo', model: 'dtm', mode: 'orbit', exag: 1, measure: false };
 const chunks = [];
 for (let cy = 0; cy < NCY; cy++) for (let cx = 0; cx < NCX; cx++) {
   const x0 = cx * CH, z0 = cy * CH, w = Math.min(CH, W - x0), h = Math.min(CH, H - z0);
@@ -320,7 +320,7 @@ el.addEventListener('pointerup', (e) => {
     const o = ray.ray.origin.clone(), d = ray.ray.direction.clone();
     for (let t = 0; t < 8000; t += 2) { const p = o.clone().addScaledVector(d, t); if (p.x < 0 || p.z < 0 || p.x > W || p.z > H) continue; if (p.y <= (surfaceAt(p.x, p.z) - YOFF) * state.exag) { hit = p; break; } }
   }
-  if (hit) showInfo(hit.x, hit.z);
+  if (hit) { if (state.measure) addMeasurePoint(hit.x, hit.z); else showInfo(hit.x, hit.z); }
 });
 const fmt = (n, d = 0) => n.toLocaleString('en-GB', { maximumFractionDigits: d, minimumFractionDigits: d });
 function areaStr(m2) { return m2 >= 10000 ? `${fmt(m2 / 10000, m2 >= 100000 ? 0 : 1)} ha` : `${fmt(m2)} m²`; }
@@ -342,7 +342,7 @@ function showInfo(x, z) {
   $('#b-catch').onclick = () => catchment(x, z);
   $('#b-walk').onclick = () => { $('#panel').classList.remove('show'); enterWalk(x, z); };
 }
-$('#pclose').onclick = () => { $('#panel').classList.remove('show'); U.showCatch.value = 0; };
+$('#pclose').onclick = () => { $('#panel').classList.remove('show'); U.showCatch.value = 0; if (state.measure) { mPts.length = 0; drawMeasure(); } };
 const OFF = [null, [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]; // code -> (dx,dy)
 function catchment(x, z) {
   const w = 3000, h = 2000, A = accG.a, F = fdirG.a;
@@ -373,6 +373,82 @@ function catchment(x, z) {
   $('#pbody').insertBefore(extra, $('#pbody .acts'));
 }
 
+
+// ---------- measure: two points, height difference, distances, ground profile ----------
+const mGroup = new THREE.Group(); scene.add(mGroup);
+const mPts = [];
+function pinSprite(label, color) {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  g.fillStyle = color; g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2); g.fill();
+  g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke();
+  g.fillStyle = '#fff'; g.font = 'bold 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, 32, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, sizeAttenuation: false }));
+  sp.scale.set(0.055, 0.055, 1); sp.renderOrder = 10; return sp;
+}
+function profile(a, b) {
+  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(2, Math.ceil(d / 1)); // 1 m steps
+  const pts = []; let along = 0, climb = 0, drop = 0, prev = null;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t, h = groundAt(x, z);
+    if (prev) { const dh = h - prev.h; along += Math.hypot(d / n, dh); if (dh > 0) climb += dh; else drop -= dh; }
+    prev = { x, z, h, s: t * d }; pts.push(prev);
+  }
+  return { d, pts, along, climb, drop };
+}
+function drawMeasure() {
+  while (mGroup.children.length) { const o = mGroup.children.pop(); o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); }
+  mPts.forEach((p, i) => { const sp = pinSprite(i ? 'B' : 'A', i ? '#d6337a' : '#1f7ae0'); sp.position.set(p.x, (groundAt(p.x, p.z) - YOFF) * state.exag + 1, p.z); mGroup.add(sp); });
+  if (mPts.length < 2) return;
+  const pr = profile(mPts[0], mPts[1]);
+  const step = Math.max(1, Math.floor(pr.pts.length / 1500));
+  const v = []; for (let i = 0; i < pr.pts.length; i += step) { const p = pr.pts[i]; v.push(p.x, (p.h - YOFF) * state.exag + 0.6, p.z); }
+  const last = pr.pts[pr.pts.length - 1]; v.push(last.x, (last.h - YOFF) * state.exag + 0.6, last.z);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe14d, depthTest: false })); line.renderOrder = 9; mGroup.add(line);
+  return pr;
+}
+function addMeasurePoint(x, z) {
+  if (mPts.length >= 2) mPts.length = 0;
+  mPts.push({ x, z }); const pr = drawMeasure();
+  if (mPts.length === 1) {
+    $('#pbody').innerHTML = `<h3>Measure</h3><div class="row">A: ground level <b>${fmt(groundAt(x, z), 1)} m</b></div><div class="row">Now tap point B.</div>`;
+    $('#panel').classList.add('show'); return;
+  }
+  const a = mPts[0], b = mPts[1], ha = groundAt(a.x, a.z), hb = groundAt(b.x, b.z), dh = hb - ha;
+  const grad = pr.d > 0 ? dh / pr.d : 0, deg = Math.atan(Math.abs(grad)) * 180 / Math.PI;
+  const hs = pr.pts.map((p) => p.h), lo = Math.min(...hs), hi = Math.max(...hs);
+  const dist = (m) => (m >= 1000 ? `${fmt(m / 1000, 2)} km` : `${fmt(m, 1)} m`);
+  // profile chart
+  const Wc = 320, Hc = 90, pad = 4, span = Math.max(hi - lo, 1);
+  const X = (s) => pad + (s / pr.d) * (Wc - 2 * pad), Y = (h) => Hc - pad - ((h - lo) / span) * (Hc - 2 * pad - 10);
+  const st = Math.max(1, Math.floor(pr.pts.length / 300));
+  let path = ''; for (let i = 0; i < pr.pts.length; i += st) path += `${X(pr.pts[i].s).toFixed(1)},${Y(pr.pts[i].h).toFixed(1)} `;
+  path += `${X(pr.d).toFixed(1)},${Y(hb).toFixed(1)}`;
+  const svg = `<svg viewBox="0 0 ${Wc} ${Hc}" preserveAspectRatio="none">
+    <polygon points="${pad},${Hc - pad} ${path} ${Wc - pad},${Hc - pad}" fill="rgba(127,209,168,.25)"/>
+    <polyline points="${path}" fill="none" stroke="#7fd1a8" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <line x1="${X(0)}" y1="${Y(ha)}" x2="${X(pr.d)}" y2="${Y(hb)}" stroke="#ffe14d" stroke-dasharray="4 3" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <text x="${pad + 2}" y="11" fill="#a9b3ab" font-size="10">${fmt(hi, 0)} m</text>
+    <text x="${pad + 2}" y="${Hc - 6}" fill="#a9b3ab" font-size="10">${fmt(lo, 0)} m</text>
+    <text x="${Wc - 14}" y="11" fill="#d6337a" font-size="11" font-weight="700">B</text><text x="${pad + 40}" y="11" fill="#1f7ae0" font-size="11" font-weight="700">A</text></svg>`;
+  $('#pbody').innerHTML = `<h3>Measure A to B</h3>
+    <div class="big"><div><small>Height difference</small><b>${dh >= 0 ? '+' : '−'}${fmt(Math.abs(dh), 1)} m</b></div>
+      <div><small>Map distance</small><b>${dist(pr.d)}</b></div></div>
+    <div class="row">A ground level <b>${fmt(ha, 1)} m</b></div>
+    <div class="row">B ground level <b>${fmt(hb, 1)} m</b></div>
+    <div class="row">Straight-line distance, A to B in 3D <b>${dist(Math.hypot(pr.d, dh))}</b></div>
+    <div class="row">Average gradient <b>${fmt(Math.abs(grad) * 100, 1)}% (${fmt(deg, 1)}°) ${dh > 0.05 ? 'up' : dh < -0.05 ? 'down' : 'level'}</b></div>
+    <div class="row">Over the ground along the line <b>${dist(pr.along)}</b></div>
+    <div class="row">Climb / drop along the line <b>+${fmt(pr.climb, 0)} m / −${fmt(pr.drop, 0)} m</b></div>
+    <div class="row">Highest / lowest on the line <b>${fmt(hi, 1)} / ${fmt(lo, 1)} m</b></div>
+    ${svg}
+    <div class="acts"><button id="m-swap">Swap A and B</button><button id="m-clear">Clear</button></div>`;
+  $('#panel').classList.add('show');
+  $('#m-clear').onclick = () => { mPts.length = 0; drawMeasure(); $('#panel').classList.remove('show'); };
+  $('#m-swap').onclick = () => { const [p, q] = mPts; mPts.length = 0; addMeasurePoint(q.x, q.z); addMeasurePoint(p.x, p.z); };
+}
+
 // ---------- UI ----------
 function setOn(grp, v) { document.querySelectorAll(`${grp} button`).forEach((b) => b.classList.toggle('on', b.dataset.v === v)); }
 function setModel(m) {
@@ -398,6 +474,13 @@ document.querySelectorAll('#g-mode button').forEach((b) => b.onclick = () => (b.
 $('#exag').onclick = () => {
   state.exag = state.exag === 1 ? 1.5 : state.exag === 1.5 ? 2 : 1; U.exag.value = state.exag; $('#exag').textContent = state.exag + '×';
   for (const c of chunks) if (c.mesh) c.mesh.frustumCulled = state.exag === 1;
+  drawMeasure();
+};
+$('#measure').onclick = () => {
+  state.measure = !state.measure; $('#measure').classList.toggle('on', state.measure);
+  if (state.measure) { if (state.mode === 'walk') exitWalk(); mPts.length = 0; drawMeasure(); U.showCatch.value = 0;
+    $('#pbody').innerHTML = '<h3>Measure</h3><div class="row">Tap point A, then point B.</div>'; $('#panel').classList.add('show'); }
+  else { mPts.length = 0; drawMeasure(); $('#panel').classList.remove('show'); }
 };
 $('#compass').onclick = () => {
   if (state.mode === 'walk') { walk.yaw = 0; return; }
