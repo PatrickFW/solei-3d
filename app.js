@@ -170,7 +170,7 @@ async function getHeights(url) {
 }
 function texLevel(L) {
   if (state.base === 'relief') return null;
-  if (state.base === 'photo') return L === 0 ? null : (L >= 3 ? 'ortho/2' : 'ortho/1');
+  if (state.base === 'photo') return L === 0 ? null : (L >= 4 ? 'ortho/3' : L === 3 ? 'ortho/2' : 'ortho/1'); // 12.5 cm, 25 cm, 50 cm tiles
   return L === 0 ? null : 'topo/1';
 }
 async function ensureOverview(model) {
@@ -251,6 +251,66 @@ async function loadFineAlong(pts) {
   await Promise.all([...need].map((k) => getHeights(k)));
 }
 const surfaceAt = (x, z) => (overview.dsm ? bilinear(overview.dsm, x / 8, z / 8) : groundAt(x, z));
+
+// ---------- buildings: cadastre footprints, LiDAR roofs (data/b) ----------
+// Walls follow the cadastral outline from the ground up to the roof; roofs are triangulated from the LiDAR
+// building returns and coloured from the orthophoto. The group is scaled in y for the exaggeration
+// (terrain does it in its shader), so ray picking works on the real geometry.
+const bGroup = new THREE.Group(); scene.add(bGroup);
+let bData = null, selBuilding = null;
+const bVert = `
+  attribute vec3 rcol; varying vec3 vV; varying vec3 vC; varying vec3 vN; uniform float smoothN;
+  void main(){ vC = rcol; vN = smoothN > 0.5 ? normalize(normalMatrix * normal) : vec3(0.0);
+    vec3 p = position; p.y += 0.06; vec4 mv = modelViewMatrix * vec4(p, 1.0); vV = mv.xyz; gl_Position = projectionMatrix * mv; }`;
+const bFrag = `
+  precision highp float;
+  varying vec3 vV; varying vec3 vC; varying vec3 vN; uniform vec3 sunDir; uniform vec3 base; uniform float useCol;
+  void main(){
+    vec3 n = useCol > 0.5 ? normalize(vN) : normalize(cross(dFdx(vV), dFdy(vV)));
+    vec3 s = normalize((viewMatrix * vec4(sunDir, 0.0)).xyz);
+    float lam = max(dot(n, s), 0.0);
+    gl_FragColor = vec4((useCol > 0.5 ? vC : base) * (0.48 + 0.62 * lam), 1.0);
+  }`;
+async function loadBuildings() {
+  const [m, buf] = await Promise.all([fetch('data/b/buildings.json').then((r) => r.json()), fetch('data/b/buildings.bin').then((r) => r.arrayBuffer())]);
+  const L = Object.fromEntries(m.layout.map((l) => [l.name, l]));
+  const view = (n, C) => new C(buf, L[n].offset, L[n].count);
+  const rp = view('roofPos', Uint16Array), rc = view('roofCol', Uint8Array), ri = view('roofIdx', Uint32Array), wp = view('wallPos', Uint16Array), wi = view('wallIdx', Uint32Array);
+  const rpos = new Float32Array(rp.length), wpos = new Float32Array(wp.length);
+  let rt = 0, wt = 0;
+  for (const b of m.buildings) {
+    for (let k = 0; k < b.rn * 3; k++) rpos[b.rv * 3 + k] = b.o[k % 3] + rp[b.rv * 3 + k] * m.scale;
+    for (let k = 0; k < b.wn * 3; k++) wpos[b.wv * 3 + k] = b.o[k % 3] + wp[b.wv * 3 + k] * m.scale;
+    b.rt0 = rt; rt += b.rt; b.wt0 = wt; wt += b.wt;
+  }
+  const mk = (pos, idx, col) => {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    if (col) g.setAttribute('rcol', new THREE.BufferAttribute(col, 3, true));
+    g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere(); return g;
+  };
+  const mat = (useCol, base) => new THREE.ShaderMaterial({ uniforms: { sunDir: U.sunDir, base: { value: new THREE.Vector3(...base) }, useCol: { value: useCol }, smoothN: { value: useCol } },
+    vertexShader: bVert, fragmentShader: bFrag, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const roofGeo = mk(rpos, ri, rc); roofGeo.computeVertexNormals(); // roofs shade smoothly; walls stay flat-faceted (derivative normals)
+  const roof = new THREE.Mesh(roofGeo, mat(1, [0.6, 0.55, 0.5]));
+  const wall = new THREE.Mesh(mk(wpos, wi, null), mat(0, [0.86, 0.81, 0.72]));
+  bGroup.add(roof, wall); bGroup.scale.y = state.exag;
+  bData = { m, roof, wall };
+}
+loadBuildings().catch((e) => console.warn('buildings', e));
+function showBuilding(h) {
+  const bs = bData.m.buildings, key = h.object === bData.roof ? 'rt0' : 'wt0', f = h.faceIndex;
+  let lo = 0, hi = bs.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bs[mid][key] <= f) lo = mid; else hi = mid - 1; }
+  const b = selBuilding = bs[lo];
+  $('#pbody').innerHTML = `<h3>Building</h3>
+    <div class="row">Eaves height above ground <b>${fmt(b.eaves, 1)} m</b></div>
+    <div class="row">Ridge (highest point) above ground <b>${fmt(b.ridge, 1)} m</b></div>
+    <div class="row">Highest point above sea level <b>${fmt(b.ground + b.ridge, 1)} m</b></div>
+    <div class="row">Ground level at the walls <b>${fmt(b.ground, 1)} m</b></div>
+    <div class="row">Footprint <b>${fmt(b.area)} m²</b></div>
+    <div class="row">Cadastral reference <b>${b.id}</b></div>`;
+  $('#panel').classList.add('show');
+}
 
 // ---------- controls ----------
 const controls = new MapControls(camera, renderer.domElement);
@@ -333,6 +393,11 @@ el.addEventListener('pointerup', (e) => {
     const o = ray.ray.origin.clone(), d = ray.ray.direction.clone();
     for (let t = 0; t < 8000; t += 2) { const p = o.clone().addScaledVector(d, t); if (p.x < 0 || p.z < 0 || p.x > W || p.z > H) continue; if (p.y <= (surfaceAt(p.x, p.z) - YOFF) * state.exag) { hit = p; break; } }
   }
+  const bh = !state.measure && bData && bGroup.visible ? ray.intersectObjects([bData.roof, bData.wall], false)[0] : null;
+  if (bh) {
+    const td = state.exag === 1 ? (hits[0]?.distance ?? Infinity) : (hit ? ray.ray.origin.distanceTo(hit) : Infinity);
+    if (bh.distance <= td + 0.5) { U.showCatch.value = 0; showBuilding(bh); return; }
+  }
   if (hit) { if (state.measure) addMeasurePoint(hit.x, hit.z); else loadFineAlong([hit]).then(() => showInfo(hit.x, hit.z)); }
 });
 const fmt = (n, d = 0) => n.toLocaleString('en-GB', { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -355,7 +420,7 @@ function showInfo(x, z) {
   $('#b-catch').onclick = () => catchment(x, z);
   $('#b-walk').onclick = () => { $('#panel').classList.remove('show'); enterWalk(x, z); };
 }
-$('#pclose').onclick = () => { $('#panel').classList.remove('show'); U.showCatch.value = 0; if (state.measure) { mPts.length = 0; drawMeasure(); } };
+$('#pclose').onclick = () => { $('#panel').classList.remove('show'); U.showCatch.value = 0; selBuilding = null; if (state.measure) { mPts.length = 0; drawMeasure(); } };
 const OFF = [null, [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]; // code -> (dx,dy)
 function catchment(x, z) {
   const w = 3000, h = 2000, A = accG.a, F = fdirG.a;
@@ -487,6 +552,7 @@ document.querySelectorAll('#g-model button').forEach((b) => b.onclick = () => {
 });
 document.querySelectorAll('#g-ovl button').forEach((b) => b.onclick = () => {
   const on = !b.classList.contains('on'); b.classList.toggle('on', on);
+  if (b.dataset.v === 'bldg') { bGroup.visible = on; if (!on && selBuilding) $('#pclose').click(); return; }
   if (b.dataset.v === 'drain') U.showDrain.value = on ? 1 : 0; else U.showSlope.value = on ? 1 : 0;
   legend();
 });
@@ -494,6 +560,7 @@ document.querySelectorAll('#g-mode button').forEach((b) => b.onclick = () => (b.
 $('#exag').onclick = () => {
   state.exag = state.exag === 1 ? 1.5 : state.exag === 1.5 ? 2 : 1; U.exag.value = state.exag; $('#exag').textContent = state.exag + '×';
   for (const c of chunks) if (c.mesh) c.mesh.frustumCulled = state.exag === 1;
+  bGroup.scale.y = state.exag;
   drawMeasure();
 };
 $('#measure').onclick = () => {
@@ -533,3 +600,4 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 updateChunks();
+window.solei = { camera, controls, state, THREE, get buildings() { return bData; } }; // debug / test hook
